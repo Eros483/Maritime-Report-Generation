@@ -8,6 +8,10 @@ from typing_extensions import Annotated
 from langgraph.graph import StateGraph, START
 from datetime import datetime
 import re
+import markdown
+import pdfkit
+import tempfile
+
 
 llm=None
 no_of_messages_retained=10
@@ -422,3 +426,202 @@ def update_chat_history(state: State)->State:
     state["chat_history"]=chat_history
     print("Left Updating Chat history")
     return state
+
+def convert_report_to_pdf(state: State):
+    report=state["report"]
+    report_conversion_prompt=f"""
+    <|im_start|>system
+    Act as a report formatter, responsible for converting text into a proper format.
+    The task is to format the user given {report} into the proper format as shown below.
+    The output should be in the correct format as shown in the below examples.
+    Ensure that the output adheres to the provided format.
+    Make minimal changes to the actual information in the content, but encapsulate it in the below provided format.
+    Make sure that the output is formatted correctly as provided.
+
+    ###Format of Output
+    From:  	Commanding Officer, Naval Support Activity Monterey
+    To:     	Here B. Recipient, Organization
+    Via:	(1) Here B. Intermediary, Organization (if needed for intermediary endorsement)
+        (2) Number “via” recipients if more than 1; do not number if only 1
+
+    Subj:  	LIMIT TO TWO LINES ALL CAPS NO ACRONYMS NO ABBREVIATIONS NO 
+        PUNCTUATION (REPEAT SUBJECT LINE AT TOP OF SUBSEQUENT PAGES)
+
+    Ref:    	(a) List as needed, or remove this line; must be referenced in the letter in order listed here
+                (b) Include references/excerpts in routing package if they will inform the CO’s decision
+
+    Encl:	(1) List as needed, or remove this line; number all enclosures here, even if just 1 
+        (2) Must be referenced in the letter in order listed here
+
+    1.  Left and right margins are always set at 1 inch.  Times New Roman 12 pitch font is preferred for Navy correspondence.  Single spacing between lines.  Double spacing between paragraphs/subparagraphs.  Send editable electronic copy to Admin for formatting/editing.
+
+        a.	Indented ¼ inch.  
+
+        b.	Indented ¼ inch.  If there is an a, there should be a b.
+
+            (1) Indented ½ inch. 
+
+            (2) Indented ½ inch.  If there is a (1), there should be a (2).
+
+                (a) Indented ¾ inch.
+
+                (b) Indented ¾ inch.  If there is an (a), there should be a (b).
+
+                    1.  Indented 1 inch.
+
+                    2.  Indented 1 inch.  If there is a 1, there should be a 2.
+
+    2.  This is the second page of this letter.
+
+    3.  For proper alignment, click on ruler across the top in Microsoft Word to set “soft” tab stops at ¼, ½, ¾, 1, 1 ¼ inches, etc.  Default tab stops set at 0.25” for each successive indentation.  Number pages 2 and up centered ½ inch from the bottom (including main letter and enclosures).
+
+    4.  Do not use automatic formatting, bulleting, or “hard” stops that change page margins.  If copying from another document, select “keep text only” option to maintain proper formatting.
+
+    5.  Break out acronyms on first use, then use the acronym the rest of the letter.
+                                                                                                    
+
+
+            I. M. COMMANDING
+
+    Copy to:  (List here, as needed; keep to the minimum number necessary)
+    Command Admin (N1/N04C)      Programs Integrator (N5)          CNRSW Chief of Staff              
+    Operations (N3)                            Information Technology (N6)   Tenant Commands
+    Public Works (N4)                       QOL Director (N9)                     NAVSUPPACT ANYWHERE
+
+    ###Examples
+    The correctly formatted output is enclosed in '''''.
+    #Example 1:
+    '''''
+	12 Jun 25
+
+    From:	Commanding Officer, Naval Support Activity Monterey  
+    To:    	Here B. Recipient, Organization  
+    Via:	(1) Here B. Intermediary, Organization  
+
+    Subj:  	ASSESSMENT OF AIRCRAFT ACTIVITY WITHIN INDIAN TERRITORIAL WATERS
+
+    Ref:	(a) Aircraft Movement Logs dated 12 Jun 25  
+            (b) Surveillance Reports compiled by Indian Naval Aviation Command  
+
+    Encl:	(1) Tabulated Movement Logs  
+            (2) Visual Reconnaissance Summary  
+
+    1.  This correspondence outlines the observed aircraft activity on 12 June 2025 within Indian territorial airspace, based on compiled data from naval surveillance systems and field reports. All contact was evaluated and determined to be of Friendly nature.  
+
+        a.	Aircraft types observed were exclusively of Indian origin, with no detection of foreign or unidentified aerial assets.
+
+        b.	Time-stamped reports indicated consistent aircraft movement in strategic sectors across Indian coastal boundaries, confirming a pattern of presence across key naval areas of responsibility (AOR).
+
+            (1) Aerial maneuvers reported included advanced combat training routines:
+
+                (a) Dogfighting simulations consistent with air-to-air engagement exercises.  
+
+                (b) Split-S and Immelmann Turn maneuvers observed in multiple sectors.  
+
+                (c) Barrel Rolls, Scissors maneuvers, and High-G turns performed—indicative of evasive and tactical training operations.
+
+                (d) Zoom climbs observed, matching profiles typical of high-speed vertical ascent training.
+
+            (2) All maneuvers occurred within authorized Indian airspace. Proximity to high-value installations remained within standard operational norms.
+
+    2.  No hostile intent or unauthorized incursion was detected. All aircraft maintained expected communication and transponder compliance with the Indian Naval Aviation Command.  
+
+    3.  The pattern of erratic but deliberate movement, high-speed turns, and advanced aerobatics aligns with known combat-readiness training routines or specialized reconnaissance tasks.  
+
+    4.  Continued observation and logging are recommended to maintain situational awareness and flag any deviations from anticipated friendly patterns.
+
+    5.  No escalation or response action is warranted at this time.
+
+            I. M. COMMANDING
+
+    Copy to:  
+    Command Admin (N1/N04C)  
+    Programs Integrator (N5)  
+    CNRSW Chief of Staff  
+    Operations (N3)  
+    Information Technology (N6)  
+    Tenant Commands  
+    Public Works (N4)  
+    QOL Director (N9)  
+    NAVSUPPACT ANYWHERE
+
+    '''''
+    <|im_end|>
+    <|im_start|>user
+    Report: {report}
+    <|im_end|>
+    <|im_start|>assistant
+    """
+    temp=0.5
+    max_tokens=1024
+
+    response=llm.create_completion(
+        prompt=report_conversion_prompt,
+        temperature=temp,
+        max_tokens=max_tokens
+    )
+
+    result=response['choices'][0]['text']
+    result=result.replace("[/INST]", "").replace("'''", "").strip()
+    
+    return result
+
+def pdf_result(state, file_path: str = "generated_report.pdf") -> bytes:
+    formatted_report=convert_report_to_pdf(state)
+    formatted_report=formatted_report.replace("*", "").replace("```", "")
+    temp_html_file_path = None
+    temp_pdf_file_path = None
+
+    try:
+        html_content = markdown.markdown(formatted_report)
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".html", mode="w", encoding="utf-8") as tmp_html:
+            tmp_html.write(html_content)
+            temp_html_file_path = tmp_html.name
+        print(f"Temporary HTML file created: {temp_html_file_path}")
+
+        if file_path:
+            # If user wants to save to a specific file, use that path
+            output_pdf_actual_path = file_path
+            return_bytes = False
+        else:
+                # If user wants bytes, create another temporary file for PDF output
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", mode="wb") as tmp_pdf:
+                temp_pdf_file_path = tmp_pdf.name
+            output_pdf_actual_path = temp_pdf_file_path
+            return_bytes = True
+
+        print(f"PDF output path for wkhtmltopdf: {output_pdf_actual_path}")
+        
+        pdfkit.from_file(temp_html_file_path, output_pdf_actual_path)
+        print(f"PDF generated by pdfkit successfully at: {os.path.abspath(output_pdf_actual_path)}")
+
+        if return_bytes:
+            # Read the generated PDF file into bytes
+            with open(output_pdf_actual_path, "rb") as f:
+                pdf_bytes = f.read()
+            return pdf_bytes
+        else:
+            # PDF was saved to disk, return None as per function signature
+            return None
+
+    except FileNotFoundError:
+        # This specific error usually means wkhtmltopdf is not found
+        error_msg = "Error: 'wkhtmltopdf' executable not found. Please ensure it's installed and in your system PATH."
+        print(error_msg)
+        raise RuntimeError(error_msg) from None # Re-raise for Streamlit to catch
+    except Exception as e:
+        print(f"An error occurred during PDF generation: {e}")
+        import traceback
+        traceback.print_exc() # Print full traceback for debugging
+        raise # Re-raise the exception to be caught by Streamlit's try/except
+    finally:
+        # Clean up temporary files
+        if temp_html_file_path and os.path.exists(temp_html_file_path):
+            os.remove(temp_html_file_path)
+            print(f"Cleaned up temporary HTML file: {temp_html_file_path}")
+        if temp_pdf_file_path and os.path.exists(temp_pdf_file_path):
+            os.remove(temp_pdf_file_path)
+            print(f"Cleaned up temporary PDF file: {temp_pdf_file_path}")
+
+

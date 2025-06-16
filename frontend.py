@@ -1,6 +1,6 @@
 import streamlit as st
 from backend.main import load_model, app
-from backend.tools import State
+from backend.tools import State, pdf_result
 
 st.set_page_config(page_title="Report Generation and Chatbot", page_icon="⚓")
 st.title("GenAI Report Assistant")
@@ -11,6 +11,11 @@ model_path=f"C:\\Users\\caio\\code\\maritime_report_generation\\models\\dolphin3
 
 #initialising everything
 llm=load_model(model_path)
+
+if 'llm_backend_initialization' not in st.session_state:
+    with st.spinner("Initializing backend"):
+        pass
+    st.session_state.llm_backend_initialization=True
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history=[]
@@ -43,9 +48,34 @@ for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
+report_content=st.session_state.langgraph_state.get("report", "")
+
+if report_content:
+    if st.button("Download Report"):
+        with st.spinner("Creating PDF document for report"):
+            try:
+                pdf_bytes=pdf_result(st.session_state.langgraph_state, file_path=None)
+
+                if pdf_bytes:
+                    st.download_button(
+                        label="Click to download the PDF",
+                        data=pdf_bytes,
+                        file_name="report.pdf",
+                        mime="application/pdf"
+                    )
+                else:
+                    st.error("No pdf bytes found, invalid report")
+
+            except Exception as e:
+                print(f"Probelm  in creating pdf report {e}")
+                st.exception(e)
+    else:
+        st.info("Click button to download report.")
+
 user_query=st.chat_input("Enter Query: ")
 
 if user_query:
+    previous_report_content=st.session_state.langgraph_state.get("report")
     st.session_state.chat_history.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
         st.markdown(user_query)
@@ -65,6 +95,11 @@ if user_query:
                      with st.chat_message("assistant"):
                         st.markdown(assistant_response)
             st.session_state.langgraph_state = final_state
+
+            new_report_content=st.session_state.langgraph_state.get("report")
+            if new_report_content and new_report_content!=previous_report_content:
+                st.toast("Report generated, refreshing page")
+                st.rerun()
 
         except Exception as e:
             st.error(f"Error processing command: {e}")
