@@ -1,6 +1,6 @@
 import streamlit as st
 from backend.main import load_model, app
-from backend.tools import State, pdf_result
+from backend.functions import State, pdf_result
 
 st.set_page_config(page_title="Report Generation and Chatbot", page_icon="⚓")
 st.title("GenAI Report Assistant")
@@ -29,7 +29,7 @@ if "langgraph_state" not in st.session_state:
         answer=None,
         db=None,
         db_info=None,
-        route=None,
+        route="",
         report_question=None,
         chat_history=[]
     )

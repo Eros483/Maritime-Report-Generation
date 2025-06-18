@@ -12,7 +12,6 @@ import markdown
 import pdfkit
 import tempfile
 
-
 llm=None
 no_of_messages_retained=10
 
@@ -29,7 +28,7 @@ class State(TypedDict):
     db: SQLDatabase
     db_info: str
 
-    route: int
+    route: str
     
     report_question: str
     chat_history: List[Dict[str, str]]
@@ -39,7 +38,9 @@ def load_model(path: str):
     Input: Model gguf Path
     Output: initialised llm
     '''
+    print("---------------------------------\n\n")
     print("Loading model")
+    print("---------------------------------\n\n")
     global llm
     llm=llama_cpp.Llama(model_path=path, chat_format="llama-2", n_ctx=8192)
     return llm
@@ -49,7 +50,9 @@ def assign_db(state: State)->State:
     handles state["db"] and state["db_info"]
     Assigns database to be used
     '''
+    print("---------------------------------\n\n")
     print("Assigning Database")
+    print("---------------------------------\n\n")
     sqlite_db=SQLDatabase.from_uri("sqlite:///sql_files/myDataBase.db")
     sqlite_info=sqlite_db.get_table_info()
     print("succesful assignment")
@@ -57,8 +60,10 @@ def assign_db(state: State)->State:
     print(sqlite_info)
     state["db"]=sqlite_db
     state["db_info"]=sqlite_info
+    print("---------------------------------\n\n")
     print(state["db"])
     print(state["db_info"])
+    print("---------------------------------\n\n")
     print("left assigning database")
     return state
 
@@ -69,62 +74,21 @@ def router(state: State)->State:
     '''
     print("Routing action to be taken")
     question=state["question"]
-    answer=state["answer"]
-    chat_history=state["chat_history"]
+    llm.reset()
     print("Initialised answer")
     routing_prompt=f"""
     <|im_start|>system
-    Act as a binary router for user questions, replying in 1 or 0.
-    The Response is to be binary in nature, and only reply in 1 or 0.
-    If chat_history is empty, or null, return 0. 
-    else, The task is to decide if the {question} is a request for explaination or for futher information or if it is finding new data, or modifying existing data.
-    Thus routing woud be of two kinds:
-    1. An explaination request
-        An explaination request, would imply the user asking for more information on a previous {answer}.
+    You are a general-purpose AI that helps people with questions.
 
-    2. A new data request
-        A new data request, would imply the user is asking more data, not available in the previous {answer}. It would necessiate creating a new query.
-
-    If it is an explaination request, return 1.
-    If it is a new data request, return 0.
-
-    The foutput should be enclosed inside '''.
-    The format of the output is '''output'''.
-
-    Structure your output such that, the first line consists of either 1 or 0.
-    Any other information should only be from the second line onwards.
-
-    If the user has explicitly asked for you to generate a report, return 0
-
-    ###Examples
-    Example question is enclosed inside ''''. Example output is enclosed inside '''.
-    #Example1:
-    ''''Generate a report on what the chinese are doing.''''
-    '''0'''
-
-    #Example2:
-    ''''Generate a report''''
-    '''0'''
-
-    #Example3:
-    ''''Elaborate more on the selection of fruits available.''''
-    '''1'''
-
-    #Example4:
-    ''''No, This report does not contain sufficient information. I need to know more about the rafale. Regenerate the report accordingly.''''
-    '''0'''
-
-    #Example5:
-    ''''Tell me more about the movement of the rafale.''''
-    '''1'''
-
-    #Example6:
-    ''''Tell me about the submarine instead. Regenerate the report.''''
-    '''0'''
+    Given a question, your job is to categorize it into one of three categories:
+    1. report: For when the user instructs, that instruct for report generation.
+    2. analysis: For when the user requests for more analysis.
+    3. general: For all other questions.
+    Your response should be one word only.
 
     <|im_end|>
     <|im_start|>user
-    Question: {input}
+    Question: {question}
     <|im_end|>
     <|im_start|>assistant
     """
@@ -139,65 +103,34 @@ def router(state: State)->State:
     print("Created Response")
     result=response['choices'][0]['text']
     result=result.replace("[/INST]", "").replace("'''", "").strip()
+    print("---------------------------------\n\n")
     print(result)
-    match = re.search(r'[01]', result)
-    digit = int(match.group(0)) if match else None
-    print(digit)
-    state["route"]=digit
+    print("---------------------------------\n\n")
+    state["route"]=result
     print("finished routing")
+    llm.reset()
     return state
 
-
 def write_sql_query(state: State)->State:
-    '''
-    Creates and assigns SQL query relevant to input
-    handles state["query"]
-    '''
-    print("Writing sql query")
+    llm.reset()
     dialect=state["db"].dialect
     top_k=5
     table_info=state["db_info"]
     input=state["question"]
-    print(table_info)
 
     prompt_template=f"""
     <|im_start|>system
-    Given an input question, create a syntactically correct {dialect} query to run to help find the answer. Unless the user specifies in his question a specific number of examples they wish to obtain, always ensure your query always has at least {top_k} results if available. You can order the results by a relevant column to return the most interesting examples in the database.
-    Ensure the created query returns all available columns.
-    Ensure that the columns queried exist in the {table_info}.
-    Ensure that values queried exist in the {table_info}.
-    Apply only user specified conditions.
-    Ensure all criterion set by user has been utilised.
-    Pay attention to use only the column names that you can see in the schema description. Be careful to not query for columns that do not exist. Also, pay attention to which column is in which table.
+    Given an input question, create a syntactically correct {dialect} query to run to help find the answer. Unless the user specifies in his question a specific number of examples they wish to obtain, always limit your query to at most {top_k} results. You can order the results by a relevant column to return the most interesting examples in the database.
+    Never query for all the columns from a specific table, only ask for a the few relevant columns given the question. Generate only one query.
+    Pay attention to use only the column names, and their values that you can see in the schema description. Be careful to not query for columns that do not exist. Also, pay attention to which column is in which table.
     Only use the following tables:
-    {table_info}.
-    The output should be enclosed inside '''.
-    The output should contain only '''query'''.
+    {table_info}
 
-    ###Additional Info
-    Submarines are categorised as subsurface.
-    Aircrafts and helicopters are categorised as air.
-    Ships are categorised as surface.
+    schema description:
+    {table_info}
 
-    ###Examples
-    Example question is enclosed inside ''''. Example output is enclosed inside '''.
-
-    #Example1:
-    ''''What are the names of the top 5 customers by revenue''''
-    '''SELECT * FROM customers ORDER BY revenue DESC LIMIT 5;'''
-
-    #Example2:
-    ''''List the top 10 products sold in the last 6 months, including their names, categories, and total units sold, only for products that belong to the 'Electronics' category and have at least 100 units sold. Sort the results by total units sold in descending order.''''
-    '''SELECT * FROM products p JOIN categories c ON p.category_id = c.id JOIN sales s ON p.id = s.product_id WHERE c.category_name = 'Electronics' AND s.sale_date >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH) GROUP BY p.name, c.category_name HAVING total_units_sold >= 100 ORDER BY total_units_sold DESC LIMIT 10;'''
-
-    #Example3:
-    ''''Tell me what the Indian aircrafts are doing''''
-    '''SELECT * from report_data where category='air' and nationality='Indian' order by time desc limit 5'''
-
-    #Example4:
-    ''''Where are the US submarines?'''
-    '''select * from report_data where category='subsurface' and nationality='US' order by time desc limit 5''
-
+    Input question:
+    {input}
     <|im_end|>
     <|im_start|>user
     Question: {input}
@@ -205,11 +138,8 @@ def write_sql_query(state: State)->State:
     <|im_start|>assistant
     """
 
-    temp=0.5
-    max_tokens=512
-
-    temp=0.5
-    max_tokens=512
+    temp=0.3
+    max_tokens=300
 
     response=llm.create_completion(
         prompt=prompt_template,
@@ -218,11 +148,21 @@ def write_sql_query(state: State)->State:
     )
 
     result=response['choices'][0]['text']
-    result=result.replace("[/INST]", "").replace("'''", "").strip()
-    
+    result=result.replace("[/INST]", "").replace("'''", "").replace("```", "").strip()
+    result = re.sub(r'\b(submarines?|ships?|aircraft|helicopters?)\b',
+           lambda m: {'submarine': 'subsurface', 'submarines': 'subsurface',
+                      'ship': 'surface', 'ships': 'surface',
+                      'aircraft': 'air', 'helicopter': 'air', 'helicopters': 'air'}[m.group(0).lower()],
+           result, flags=re.IGNORECASE)
+    result=result.lower()
     state["query"]=result
-    print("Finished writing sql queries")
+    state["question"]=input
+    llm.reset()
+    print("---------------------------------\n\n")
+    print(state["query"])
+    print("---------------------------------\n\n")
     return state
+
 
 def execute_query(state: State):
     '''
@@ -233,6 +173,9 @@ def execute_query(state: State):
     execute_query_tool=QuerySQLDataBaseTool(db=state["db"])
     result=execute_query_tool.invoke(state["query"])
     state["result"]=result
+    print("---------------------------------\n\n")
+    print(state["result"])
+    print("---------------------------------\n\n")
     print("finished executing query")
     return state
 
@@ -241,6 +184,7 @@ def report_generation(state: State)->State:
     Generates reports.
     handles state["report"] and updates state["chat_history]
     '''
+    llm.reset()
     print("Generating Report")
     question=state["question"]
     context=state["result"]
@@ -364,6 +308,7 @@ def report_generation(state: State)->State:
     state["question"]=question
     state["report_question"]=question
     print("Finished report generation")
+    llm.reset()
     return state
 
 def elaborate_on_response(state: State)->State:
@@ -371,19 +316,17 @@ def elaborate_on_response(state: State)->State:
     elaborates on given information, and assigns it to input
     handles state["answer"] and updates state["chat_history"]
     '''
+    llm.reset()
     print("Elaborating on given question")
     question=state["question"]
     context=state["report"]
     data=state["result"]
-    chat_history=state["chat_history"]
 
     elaboration_prompt=f"""
     <|im_start|>system
     Act as an experienced Indian military tactician.
     Explain it like someone who is a Indian naval commander.
-    Answer the user's {question} using the given {context} and {data}.
-    Consider the previous questions and responses the user had received, {chat_history}, while creating the output to ensure there is no redundancy while creating response.
-    Be precise and concise in nature, with short, to the point responses in military parlance.
+    Answer the user's {question} using the given {context} and {data} in military parlance.
     Enclose the responses with '''.
     <|im_end|>
     <|im_start|>user
@@ -624,4 +567,5 @@ def pdf_result(state, file_path: str = "generated_report.pdf") -> bytes:
             os.remove(temp_pdf_file_path)
             print(f"Cleaned up temporary PDF file: {temp_pdf_file_path}")
 
-
+def general_response(state: State):
+    return
