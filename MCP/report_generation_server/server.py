@@ -1,16 +1,10 @@
-import os
-from langchain_community.utilities import SQLDatabase
-from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
-from langchain import hub
 import llama_cpp
-from typing import TypedDict, Dict, List
-from typing_extensions import Annotated
-from langgraph.graph import StateGraph, START
 from datetime import datetime
-import re
-import markdown
-import pdfkit
-import tempfile
+from mcp.server.fastmcp import FastMCP
+import json
+
+mcp=FastMCP("Report Generation Usage")
+model_path=f"C:\\Users\\caio\\code\\maritime_report_generation\\models\\dolphin3.0-llama3.2-3b-q5_k_m.gguf"
 
 def load_model(path: str):
     '''
@@ -21,13 +15,12 @@ def load_model(path: str):
     llm=llama_cpp.Llama(model_path=path, chat_format="llama-2", n_ctx=8192)
     return llm
 
-model_path=f"C:\\Users\\caio\\code\\maritime_report_generation\\models\\dolphin3.0-llama3.2-3b-q5_k_m.gguf"
-
 #initialising everything
 print("Initialising model.")
 llm=load_model(model_path)
 
-def report_generation(question, result):
+@mcp.tool(description="Generates report as per provided question, and previously queried data.")
+async def report_generation(question, result):
     '''
     Generates reports.
     handles state["report"] and updates state["chat_history]
@@ -142,19 +135,36 @@ def report_generation(question, result):
     temp=0.5
     max_tokens=1500
 
-    response=llm.create_completion(
-        prompt=prompt_template,
-        temperature=temp,
-        max_tokens=max_tokens
-    )
+    try:
+        response=llm.create_completion(
+            prompt=prompt_template,
+            temperature=temp,
+            max_tokens=max_tokens
+        )
 
-    result=response['choices'][0]['text']
-    result=result.replace("[/INST]", "").strip()
-    
-    state["report"]=result
-    state["answer"]=result
-    state["question"]=question
-    state["report_question"]=question
-    print("Finished report generation")
-    llm.reset()
-    return state
+        result=response['choices'][0]['text']
+        result=result.replace("[/INST]", "").strip()
+        llm.close()
+
+        response={
+            "question": question, 
+            "data": result,
+            "report": result, 
+            "status": "Report Generated Succesfully"
+        }
+
+        return json.dumps(response, indent=2)
+
+
+    except Exception as e:
+        error_response={
+            "question": question,
+            "error": str(e),
+            "status": "error"
+        }
+        print(f"Error processing request, {e}")
+        return json.dumps(error_response, indent=2)
+
+if __name__ == "__main__":
+    # Initialize and run the server
+    mcp.run(transport='stdio')

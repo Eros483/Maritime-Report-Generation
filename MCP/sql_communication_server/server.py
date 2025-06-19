@@ -6,6 +6,8 @@ from mcp.server.fastmcp import FastMCP
 import json
 
 dialect="sqlite"
+mcp=FastMCP("SQLite Database Usage")
+model_path=f"C:\\Users\\caio\\code\\maritime_report_generation\\models\\dolphin3.0-llama3.2-3b-q5_k_m.gguf"
 
 def load_model(path: str):
     '''
@@ -25,12 +27,6 @@ def assign_db():
     sqlite_info=sqlite_db.get_table_info()
     return sqlite_db, sqlite_info
 
-mcp=FastMCP("SQLite Database Usage")
-
-#model path
-model_path=f"C:\\Users\\caio\\code\\maritime_report_generation\\models\\dolphin3.0-llama3.2-3b-q5_k_m.gguf"
-
-#initialising everything
 print("Initialising model.")
 llm=load_model(model_path)
 print("Model ready.")
@@ -85,7 +81,7 @@ def write_sql_query(question: str, db_info: str):
                       'aircraft': 'air', 'helicopter': 'air', 'helicopters': 'air'}[m.group(0).lower()],
            result, flags=re.IGNORECASE)
     result=result.lower()
-    llm.reset()
+    llm.close()
     return result
 
 @mcp.tool(description=f"Takes syntactically {dialect} correct queries, and executes it on sql database.")
