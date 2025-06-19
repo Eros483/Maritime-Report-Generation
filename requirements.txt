@@ -9,3 +9,5 @@ langgraph
 markdown
 pdfkit
 geopy
+mcp
+llama_index
