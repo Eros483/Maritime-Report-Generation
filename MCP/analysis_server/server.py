@@ -1,22 +1,14 @@
-from langchain_community.utilities import SQLDatabase
-from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
 import llama_cpp
-import re
+from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 import json
+from langchain_community.utilities import SQLDatabase
+from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
+import re
 
 dialect="sqlite"
-mcp=FastMCP("SQLite Database Usage")
+mcp=FastMCP("Analysis Generation")
 model_path=f"C:\\Users\\caio\\code\\maritime_report_generation\\models\\dolphin3.0-llama3.2-3b-q5_k_m.gguf"
-
-def load_model(path: str):
-    '''
-    Input: Model gguf Path
-    Output: initialised llm
-    '''
-    global llm
-    llm=llama_cpp.Llama(model_path=path, chat_format="llama-2", n_ctx=8192)
-    return llm
 
 def assign_db():
     '''
@@ -27,13 +19,21 @@ def assign_db():
     sqlite_info=sqlite_db.get_table_info()
     return sqlite_db, sqlite_info
 
+def load_model(path: str):
+    '''
+    Input: Model gguf Path
+    Output: initialised llm
+    '''
+    global llm
+    llm=llama_cpp.Llama(model_path=path, chat_format="llama-2", n_ctx=8192)
+    return llm
+
 print("Initialising model.")
 llm=load_model(model_path)
-print("Model ready.")
+print("Model ready for SQL communication and report Generation.")
 db, db_info=assign_db()
 print("Datbase Ready.")
 
-@mcp.tool(description="Generates sql query from natural language input.")
 def write_sql_query(question: str, db_info: str):
     llm.reset()
     top_k=5
@@ -81,10 +81,9 @@ def write_sql_query(question: str, db_info: str):
                       'aircraft': 'air', 'helicopter': 'air', 'helicopters': 'air'}[m.group(0).lower()],
            result, flags=re.IGNORECASE)
     result=result.lower()
-    llm.close()
+    llm.reset()
     return result
 
-@mcp.tool(description=f"Takes syntactically {dialect} correct queries, and executes it on sql database.")
 def execute_query(query: str, db)->str:
     '''
     Runs SQL query on server and returns relevant tuples as a reponse.
@@ -95,36 +94,56 @@ def execute_query(query: str, db)->str:
     result=execute_query_tool.invoke(query)
     return result
 
-@mcp.tool(description="A tool that takes natural language questions as input, and returns relevant data from a sql database.")
-async def fetch_data_from_sql(question: str)->str:
-    try:    
-        print(f"Processing Question {question}")
+def elaborate_on_response(input, data, history):
+    '''
+    elaborates on given information, and assigns it to input
+    handles state["answer"] and updates state["chat_history"]
+    '''
+    llm.reset()
+    print("Elaborating on given question")
+    question=input
+    data=data
+    history=history
 
-        query=write_sql_query(question, db_info)
-        print(f"Sql query written->\n\n {query}")
+    elaboration_prompt=f"""
+    <|im_start|>system
+    Act as an experienced Indian military tactician.
+    Explain it like someone who is a Indian naval commander.
+    Answer the user's question using the given data in military parlance.
+    Consider the user's previous queries carefully in the provided chat history.
+    Enclose the responses with '''.
 
-        result=execute_query(query, db)
-        print(f"Executed query, received response->\n\n {result}")
+    data: {data}
+    chat history: {history}
 
-        response={
-            "question": question, 
-            "query": query,
-            "result": result, 
-            "status": "sql query generated and executed succesfully."
-        }
+    <|im_end|>
+    <|im_start|>user
+    Question: {question}
+    <|im_end|>
+    <|im_start|>assistant
+    """
+    temp=0.6
+    max_tokens=250
 
-        return json.dumps(response, indent=2)
+    response=llm.create_completion(
+        prompt=elaboration_prompt,
+        temperature=temp,
+        max_tokens=max_tokens
+    )
 
+    result=response['choices'][0]['text']
+    result=result.replace("[/INST]", "").replace("'''", "").strip()
 
-    except Exception as e:
-        error_response={
-            "question": question,
-            "error": str(e),
-            "status": "error"
-        }
-        print(f"Error processing request, {e}")
-        return json.dumps(error_response, indent=2)
+    print("Finished Response Elaboration")
+    llm.reset()
+    return result
 
+@mcp.tool(description="A tool that takes natural language questions as input, generates relevant sql queries, executes them, and generates a succient analysis.")
+def analysis(input, history):
+    query=write_sql_query(input, db_info)
+    result=execute_query(query, db)
+    analysis=elaborate_on_response(input, result, history)
+    return analysis
 
 if __name__ == "__main__":
     # Initialize and run the server
