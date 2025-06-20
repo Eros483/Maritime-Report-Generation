@@ -1,3 +1,5 @@
+#MCP/report_generation/server.py
+
 import llama_cpp
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
@@ -5,6 +7,8 @@ import json
 from langchain_community.utilities import SQLDatabase
 from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
 import re
+
+from ..state_manager import read_state, update_field, add_chat_entry
 
 dialect="sqlite"
 mcp=FastMCP("Report Generation")
@@ -224,16 +228,20 @@ def report_generation(question, result):
 async def generate_report(question: str)->str:
     try:    
         print(f"Processing Question {question}")
+        update_field("query", question)
 
         query=write_sql_query(question, db_info)
         print(f"Sql query written->\n\n {query}")
+        update_field("sql_query", query)
 
         result=execute_query(query, db)
         print(f"Executed query, received response->\n\n {result}")
+        update_field("result", result)
 
         report=report_generation(question, result)
         if report:
             report_generated=True
+            update_field("report", report)
             print(f"Created Report.")
         else:
             report_generated=False
@@ -241,7 +249,9 @@ async def generate_report(question: str)->str:
         if report_generated:
             return report
         else:
-            return f"report not generated."
+            error_msg = "Report not generated."
+            add_chat_entry(question, error_msg, "Report Generation (Error)")
+            return error_msg
 
     except Exception as e:
         error_response={

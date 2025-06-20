@@ -1,3 +1,5 @@
+#MCP/analysis_server/server.py
+
 import llama_cpp
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
@@ -5,6 +7,8 @@ import json
 from langchain_community.utilities import SQLDatabase
 from langchain_community.tools.sql_database.tool import QuerySQLDataBaseTool
 import re
+
+from ..state_manager import read_state, update_field, add_chat_entry, get_chat_history_text
 
 dialect="sqlite"
 mcp=FastMCP("Analysis Generation")
@@ -139,10 +143,23 @@ def elaborate_on_response(input, data, history):
     return result
 
 @mcp.tool(description="A tool that takes natural language questions as input, generates relevant sql queries, executes them, and generates a succient analysis.")
-def analysis(input, history):
+def analysis(input, history=""):
+    update_field("query", input)
+    
     query=write_sql_query(input, db_info)
+    update_field("sql_query", query)
+
+    if not history:
+        history=get_chat_history_text()
+
     result=execute_query(query, db)
+    update_field("result", result)
+
     analysis=elaborate_on_response(input, result, history)
+    update_field("analysis", analysis)
+
+    add_chat_entry(input, analysis, "Analysis")
+    
     return analysis
 
 if __name__ == "__main__":
