@@ -1,6 +1,7 @@
 import streamlit as st
 from backend.main import load_model, app
 from backend.functions import State, pdf_result
+import time
 
 st.set_page_config(page_title="Report Generation and Chatbot", page_icon="⚓")
 st.title("GenAI Report Assistant")
@@ -75,6 +76,7 @@ if report_content:
 user_query=st.chat_input("Enter Query: ")
 
 if user_query:
+    start_time=time.time()
     previous_report_content=st.session_state.langgraph_state.get("report")
     st.session_state.chat_history.append({"role": "user", "content": user_query})
     with st.chat_message("user"):
@@ -86,24 +88,35 @@ if user_query:
             assistant_response=final_state.get("answer", "No answer generated.")
             st.session_state.chat_history = final_state.get("chat_history", [])
 
+            end_time=time.time()
+            response_time=end_time-start_time
+
             if st.session_state.chat_history:
                 last_message = st.session_state.chat_history[-1]
                 if last_message["role"] == "assistant":
                     with st.chat_message("assistant"):
                         st.markdown(last_message["content"])
+                        st.caption(f"Response time: {response_time:.2f} seconds")
+                        print(response_time)
                 else:
                      with st.chat_message("assistant"):
                         st.markdown(assistant_response)
+                        st.caption(f"Response time: {response_time:.2f} seconds")
+                        print(response_time)
             st.session_state.langgraph_state = final_state
 
             new_report_content=st.session_state.langgraph_state.get("report")
             if new_report_content and new_report_content!=previous_report_content:
                 st.toast("Report generated, refreshing page")
                 st.rerun()
+                print(response_time)
 
         except Exception as e:
+            end_time=time.time()
+            response_time=end_time-start_time
             st.error(f"Error processing command: {e}")
             # Append error message to Streamlit's display history as well
             st.session_state.chat_history.append({"role": "assistant", "content": f"Error: {e}"})
             with st.chat_message("assistant"):
                 st.markdown(f"Error: {e}")
+                st.caption(f"Response time: {response_time:.2f} seconds")
